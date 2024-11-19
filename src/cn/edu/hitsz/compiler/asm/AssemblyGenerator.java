@@ -1,8 +1,10 @@
 package cn.edu.hitsz.compiler.asm;
 
 import cn.edu.hitsz.compiler.NotImplementedException;
-import cn.edu.hitsz.compiler.ir.Instruction;
+import cn.edu.hitsz.compiler.ir.*;
+import cn.edu.hitsz.compiler.utils.FileUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -30,9 +32,62 @@ public class AssemblyGenerator {
      *
      * @param originInstructions 前端提供的中间代码
      */
+    private List<Instruction> processedInst = new ArrayList<>();
+    private List<String> asmInst = new ArrayList<>(List.of(".text"));
+
+    private RegAlloc regMap = new RegAlloc();
+
     public void loadIR(List<Instruction> originInstructions) {
         // TODO: 读入前端提供的中间代码并生成所需要的信息
-        throw new NotImplementedException();
+        for (var inst: originInstructions){
+            // 遇到ret指令舍弃后面的指令
+            if (inst.getKind().isReturn()) {
+                processedInst.add(inst);
+                break;
+            }
+            else if (inst.getKind().isUnary()) processedInst.add(inst);
+            else {
+                IRValue ls = inst.getLHS();
+                IRValue rs = inst.getRHS();
+                IRVariable res = inst.getResult();
+
+                if (ls.isIRVariable() && rs.isIRVariable() ) processedInst.add(inst);
+                else if (ls.isImmediate() && rs.isImmediate()) {
+                    int tmp = 0;
+                    if (inst.getKind() == InstructionKind.ADD) tmp = ((IRImmediate) ls).getValue() + ((IRImmediate) rs).getValue();
+                    else if (inst.getKind() == InstructionKind.SUB) tmp = ((IRImmediate) ls).getValue() - ((IRImmediate) rs).getValue();
+                    else if (inst.getKind() == InstructionKind.MUL) tmp = ((IRImmediate) ls).getValue() * ((IRImmediate) rs).getValue();
+                    processedInst.add(Instruction.createMov(res, IRImmediate.of(tmp)));
+                }
+                else if (ls.isIRVariable() && rs.isImmediate()) {
+                    if (inst.getKind() == InstructionKind.MUL) {
+                        IRVariable tmp = IRVariable.temp();
+                        processedInst.add(Instruction.createMov(tmp, rs));
+                        processedInst.add(Instruction.createMul(res, tmp, ls));
+                    }
+                    else if (inst.getKind() == InstructionKind.SUB) {
+                        IRImmediate tmp = IRImmediate.of(-((IRImmediate)rs).getValue());
+                        processedInst.add(Instruction.createAdd(res, ls, tmp));
+                    }
+                    else processedInst.add(inst);
+                }
+                // ls是立即数
+                else {
+                    if (inst.getKind() == InstructionKind.ADD) processedInst.add(Instruction.createAdd(res,rs,ls));
+                    else if (inst.getKind() == InstructionKind.SUB){
+                        IRImmediate tmp = IRImmediate.of(-((IRImmediate) ls).getValue());
+                        processedInst.add(Instruction.createAdd(res, rs, tmp));
+                    }
+                    else {
+                        IRVariable tmp = IRVariable.temp();
+                        processedInst.add(Instruction.createMov(tmp, ls));
+                        processedInst.add(Instruction.createMul(res, tmp, rs));
+                    }
+                }
+            }
+
+        }
+//        throw new NotImplementedException();
     }
 
 
@@ -47,7 +102,51 @@ public class AssemblyGenerator {
      */
     public void run() {
         // TODO: 执行寄存器分配与代码生成
-        throw new NotImplementedException();
+//        throw new NotImplementedException();
+        for (int i=0;i<processedInst.size();i++) {
+            Instruction inst = processedInst.get(i);
+            String asm = "";
+            switch (inst.getKind()) {
+                case MOV -> {
+                    IRValue val = inst.getFrom();
+                    IRVariable res = inst.getResult();
+
+                    if (val.isImmediate()) asm = String.format("\tli %s, %d", regMap.allocReg(res, processedInst, i).toString(), ((IRImmediate) val).getValue());
+                    else asm = String.format("\tmv %s, %s", regMap.allocReg(res, processedInst, i).toString(), regMap.allocReg((IRVariable) val, processedInst, i).toString());
+                }
+                case RET -> {
+                    IRValue retVal = inst.getReturnValue();
+                    if (retVal.isImmediate())
+                        asm = String.format("\tmv a0, %d", ((IRImmediate) retVal).getValue());
+                    else
+                        asm = String.format("\tmv a0, %s", regMap.allocReg((IRVariable) retVal, processedInst, i));
+                }
+                case ADD -> {
+                    IRValue ls = inst.getLHS();
+                    IRValue rs = inst.getRHS();
+                    IRVariable res = inst.getResult();
+
+                    Reg lsReg = regMap.allocReg((IRVariable) ls, processedInst, i);
+                    Reg resReg = regMap.allocReg(res, processedInst, i);
+                    if (rs.isImmediate()) asm = String.format("\taddi %s, %s, %d",resReg.toString(), lsReg.toString(), ((IRImmediate) rs).getValue());
+                    else {
+                        Reg rsReg = regMap.allocReg((IRVariable) rs, processedInst, i);
+                        asm = String.format("\taddi %s, %s, %s",resReg.toString(), lsReg.toString(), rsReg.toString());
+                    }
+                }
+                case SUB, MUL -> {
+                    Reg lsReg = regMap.allocReg((IRVariable) inst.getLHS(), processedInst, i);
+                    Reg resReg = regMap.allocReg(inst.getResult(), processedInst, i);
+                    Reg rsReg = regMap.allocReg((IRVariable) inst.getRHS(), processedInst, i);
+                    if (inst.getKind() == InstructionKind.SUB)
+                        asm = String.format("\tsub %s, %s, %s", resReg.toString(), lsReg.toString(), rsReg.toString());
+                    else
+                        asm = String.format("\tmul %s, %s, %s", resReg.toString(), lsReg.toString(), rsReg.toString());
+                }
+            }
+            asm += "\t\t# %s".formatted(inst.toString());
+            asmInst.add(asm);
+        }
     }
 
 
@@ -58,7 +157,8 @@ public class AssemblyGenerator {
      */
     public void dump(String path) {
         // TODO: 输出汇编代码到文件
-        throw new NotImplementedException();
+        FileUtils.writeLines(path, asmInst);
+//        throw new NotImplementedException();
     }
 }
 
