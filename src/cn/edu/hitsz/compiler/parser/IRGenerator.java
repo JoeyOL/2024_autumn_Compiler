@@ -44,11 +44,19 @@ public class IRGenerator implements ActionObserver {
         IRVariable exp_val;
         Symbol head;
         switch (production.index()) {
+            case 12:
+                break; // A -> B;
+            case 14:
+                break; // B -> id;
+            case 15: // B -> IntConst;
+                break;
+            case 10:
+                break; // E -> A;
+
             case 6: // S -> id = E;
                 rs = symbols.pop();
                 symbols.pop();
                 ls = symbols.pop();
-
                 irValues.add(Instruction.createMov((IRVariable) ls.getIRValue(), rs.getIRValue()));
                 symbols.push(new Symbol(production.head()));
                 break;
@@ -78,8 +86,7 @@ public class IRGenerator implements ActionObserver {
                 head.setIRValue(exp_val);
                 symbols.push(head);
                 break;
-            case 10:
-                break; // E -> A;
+
             case 11: // A -> A * B;
                 rs = symbols.pop();
                 symbols.pop();
@@ -90,8 +97,7 @@ public class IRGenerator implements ActionObserver {
                 head.setIRValue(exp_val);
                 symbols.push(head);
                 break;
-            case 12:
-                break; // A -> B;
+
             case 13: // B -> ( E )
                 symbols.pop();
                 head = new Symbol(production.head());
@@ -99,10 +105,7 @@ public class IRGenerator implements ActionObserver {
                 symbols.pop();
                 symbols.push(head);
                 break;
-            case 14:
-                break; // B -> id;
-            case 15:
-                break;
+
             default:
                 for (int i = 0; i < production.body().size(); i++) symbols.pop();
                 symbols.push(new Symbol(production.head()));

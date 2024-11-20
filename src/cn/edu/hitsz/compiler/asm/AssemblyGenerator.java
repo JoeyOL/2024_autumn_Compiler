@@ -75,8 +75,9 @@ public class AssemblyGenerator {
                 else {
                     if (inst.getKind() == InstructionKind.ADD) processedInst.add(Instruction.createAdd(res,rs,ls));
                     else if (inst.getKind() == InstructionKind.SUB){
-                        IRImmediate tmp = IRImmediate.of(-((IRImmediate) ls).getValue());
-                        processedInst.add(Instruction.createAdd(res, rs, tmp));
+                        IRVariable tmp = IRVariable.temp();
+                        processedInst.add(Instruction.createMov(tmp, ls));
+                        processedInst.add(Instruction.createSub(res, tmp, rs));
                     }
                     else {
                         IRVariable tmp = IRVariable.temp();
@@ -117,7 +118,7 @@ public class AssemblyGenerator {
                 case RET -> {
                     IRValue retVal = inst.getReturnValue();
                     if (retVal.isImmediate())
-                        asm = String.format("\tmv a0, %d", ((IRImmediate) retVal).getValue());
+                        asm = String.format("\tli a0, %d", ((IRImmediate) retVal).getValue());
                     else
                         asm = String.format("\tmv a0, %s", regMap.allocReg((IRVariable) retVal, processedInst, i));
                 }
@@ -131,7 +132,7 @@ public class AssemblyGenerator {
                     if (rs.isImmediate()) asm = String.format("\taddi %s, %s, %d",resReg.toString(), lsReg.toString(), ((IRImmediate) rs).getValue());
                     else {
                         Reg rsReg = regMap.allocReg((IRVariable) rs, processedInst, i);
-                        asm = String.format("\taddi %s, %s, %s",resReg.toString(), lsReg.toString(), rsReg.toString());
+                        asm = String.format("\tadd %s, %s, %s",resReg.toString(), lsReg.toString(), rsReg.toString());
                     }
                 }
                 case SUB, MUL -> {
